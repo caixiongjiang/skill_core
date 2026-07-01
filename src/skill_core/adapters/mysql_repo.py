@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS skill (
     tags         JSON COMMENT '标签 JSON 数组',
     version      VARCHAR(32) DEFAULT '1.0.0' COMMENT '版本号',
     requires_tools JSON COMMENT '依赖工具 JSON 数组',
+    fallback_for_tools JSON COMMENT '降级工具 JSON 数组',
     body         MEDIUMTEXT NOT NULL COMMENT 'SKILL.md 正文',
     created_by   VARCHAR(64) COMMENT '创建者 user_id',
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -117,6 +118,16 @@ CREATE TABLE IF NOT EXISTS skill_version (
     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 """
+
+# 旧库增量迁移（CREATE TABLE IF NOT EXISTS 不会补列）
+SKILL_TABLE_ALTER_DDL = [
+    """
+    ALTER TABLE skill
+    ADD COLUMN fallback_for_tools JSON NULL
+    COMMENT '降级工具 JSON 数组'
+    AFTER requires_tools
+    """,
+]
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +157,13 @@ class MySQLSkillRepository:
             session.execute(text(SKILL_TABLE_DDL))
             session.execute(text(SKILL_STATE_TABLE_DDL))
             session.execute(text(SKILL_VERSION_TABLE_DDL))
+            for alter_sql in SKILL_TABLE_ALTER_DDL:
+                try:
+                    session.execute(text(alter_sql))
+                except Exception as e:
+                    # 1060: Duplicate column name — 列已存在则忽略
+                    if "Duplicate column name" not in str(e):
+                        raise
             # 确保 version 表有初始行
             existing = session.query(SkillVersionModel).first()
             if existing is None:
